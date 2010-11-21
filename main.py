@@ -5,6 +5,7 @@ from google.appengine.ext import db
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp import util
 from google.appengine.api.urlfetch import fetch
+import logging
 import datetime
 import models
 import hutils
@@ -17,7 +18,7 @@ import re
 #  1. Origin                                                                   #
 #     The origin server will be mirrored by this instance of SymPullCDN        #
 #     configure a full http:// path with a FQDN, trailing slash included       #
-origin = "http://replace*me/"                                                  #
+origin = "http://thumbnail-service.appspot.com/"                               #
 #                                                                              #
 #  2. Cachable Codes                                                           #
 #     This is a list of HTTP Status Codes that will be cached when sent from   #
@@ -53,12 +54,19 @@ class MainHandler(webapp.RequestHandler):
        #                                                                                          #
        ############################################################################################
        
-        entity = Entity.all().filter("uri =", self.request.path).get()
+        qs = self.request.query_string
+        path = self.request.path + (('?' + qs) if qs else '')
+        logging.info('path %s' % path)
+        try:
+            entity = Entity.all().filter("uri =", path).get()
+        except Exception, e:
+            logging.exception(e)
+            entity = None
         if entity:
             # Revalidate if required.  Note, revalidation here updates the
             # request /after/ this one for the given entity.
             if entity.expires <= datetime.datetime.now():
-                request_entity = fetch( origin + self.request.path, method="GET", 
+                request_entity = fetch( origin + path, method="GET",
                         headers={"If-Modified-Since" : entity.LastModified} )
                 
                 # If 304 JUST update the headers.
@@ -107,7 +115,7 @@ class MainHandler(webapp.RequestHandler):
        #                                                                                          #
        ############################################################################################
        
-        request_entity = fetch( origin + self.request.path, method="GET", payload=None )
+        request_entity = fetch( origin + path, method="GET", payload=None )
         
         # Respect no-cache and private
         if "Cache-Control" in request_entity.headers:
@@ -129,7 +137,7 @@ class MainHandler(webapp.RequestHandler):
         
         # Set up data to store.
         entity = Entity(
-            uri          = self.request.path,
+            uri          =path,
             headers      = dict(request_entity.headers),
             expires      = hutils.get_expires( request_entity.headers ),
             LastModified = hutils.get_header( "Last-Modified", request_entity.headers ),
